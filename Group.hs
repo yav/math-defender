@@ -4,8 +4,10 @@ module Group where
 
 import Allegro.Graphics
 import Allegro.Primitives
-import Control.Monad(zipWithM_)
+import Control.Monad(zipWithM_,guard)
+import Data.Maybe(fromMaybe,listToMaybe)
 import SeqPtr
+
 
 groupMargin :: Float
 groupMargin = 10
@@ -62,9 +64,8 @@ prim p = Dim { thing = Prim p, .. }
   where Dim { .. } = dimPrim p
 
 manySh :: Dir -> [Dim (Shape p)] -> Dim (Shape p)
-manySh d ds0 = Dim { width = ms + w, height = ms + h, thing = Many d ds }
+manySh d ds = Dim { width = ms + w, height = ms + h, thing = Many d ds }
   where
-  ds    = concatMap flat ds0
   ws    = map width ds
   hs    = map height ds
   ms    = 2 * groupMargin
@@ -73,15 +74,6 @@ manySh d ds0 = Dim { width = ms + w, height = ms + h, thing = Many d ds }
     case d of
       Hor -> (sum ws, maximum (0 : hs))
       Ver -> (maximum (0 : ws), sum hs)
-
-  flat p =
-    case thing p of
-      Prim {} -> [p]
-      Many d' ds' | d == d'    -> ds'
-                  | otherwise  -> [p]
-      Selected {} -> [p]  -- ?
-
-
 
 selected :: Maybe (Dim (Shape p)) -> Dim (Shape p)
 selected ms = Dim { thing = Selected s, width = w, height = h }
@@ -128,9 +120,42 @@ shDraw (x,y) me@Dim { thing = mySh, .. } =
 
 --------------------------------------------------------------------------------
 
+data UI p = UI { uiPtr    :: SeqPtr (Dim (Shape p))
+               , uiDir    :: Dir
+               , uiOpened :: [ ([Dim (Shape p)], [Dim (Shape p)]) ]
+               }
+
+
+
+uiAtTop :: UI p -> Bool
+uiAtTop UI { .. } = null uiOpened
+
+uiAlone :: UI p -> Bool
+uiAlone UI { .. } = null (seqBefore uiPtr) && null (seqAfter uiPtr)
+
+uiCurShape :: UI p -> Maybe (Shape p)
+uiCurShape UI { .. } = fmap thing (seqCur uiPtr)
+
+
+
+
+--------------------------------------------------------------------------------
+-- Traversals
+
+instance Functor UI where
+  fmap f UI { .. } = UI { uiPtr     = fmap dfmap uiPtr
+                        , uiOpened  = map (fmap2 (map dfmap)) uiOpened
+                        , .. }
+    where
+    dfmap = fmap (fmap f)
+    fmap2 g (x,y) = (g x, g y)
+
 foldUI :: (Dir -> p -> a) -> (Dir -> [a] -> a) -> UI p -> a
 foldUI ifPrim ifMany ui = foldShape ifPrim ifMany (uiDir ui)
                         $ thing $ uiToShape ui
+
+
+
 
 seqPtrToShape :: Dir -> SeqPtr (Dim (Shape p)) -> Dim (Shape p)
 seqPtrToShape d SeqPtr { .. } =
@@ -145,83 +170,69 @@ uiToShape UI { .. } =
     parens (otherDir d) (manySh d (jnR ls (inner : rs))) more
 
 
-data UI p = UI { uiPtr    :: SeqPtr (Dim (Shape p))
-               , uiDir    :: Dir
-               , uiOpened :: [ ([Dim (Shape p)], [Dim (Shape p)]) ]
-               }
-
-instance Functor UI where
-  fmap f UI { .. } = UI { uiPtr     = fmap dfmap uiPtr
-                        , uiOpened  = map (fmap2 (map dfmap)) uiOpened
-                        , .. }
-    where
-    dfmap = fmap (fmap f)
-    fmap2 g (x,y) = (g x, g y)
-
 
 emptyUI :: UI p
 emptyUI = UI { uiPtr = seqEmpty, uiDir = Ver, uiOpened = [] }
 
-uiAtTop :: UI p -> Bool
-uiAtTop UI { .. } = null uiOpened
 
-uiNorm UI { .. } =
-  case seqCur uiPtr of
-    Just dsh ->
-      case thing dsh of
-        Many _ []  -> UI { uiPtr = seqSet Nothing uiPtr, .. }
-        Many _ [d] -> UI { uiPtr = seqSet (Just d) uiPtr, .. }
-        _          -> UI { .. }
-    Nothing -> UI { .. }
-
-{-
 uiMoveSel :: SeqDir -> UI p -> UI p
-uiMoveSel d UI { .. } ->
+uiMoveSel side ui@UI { .. } =
   case seqCur uiPtr of
-    Nothing -> uiMove d UI { .. }
+    Nothing -> case side of
+                  Prev -> uiMove LT ui
+                  Next -> uiMove GT ui
     Just dsh ->
-      case 
-      -}
+      fromMaybe ui $
+      do (a,new) <- seqExtract side uiPtr
+         let els = case thing dsh of
+                     Many _ [] -> a
+                     Many d ds | d == uiDir ->
+                       manySh uiDir $ case side of
+                                        Prev -> a : ds
+                                        Next -> ds ++ [a]
+                     _ -> manySh uiDir $ case side of
+                                           Prev -> [a,dsh]
+                                           Next -> [dsh,a]
+
+         return UI { uiPtr = seqSet (Just els) new, .. }
 
 
 uiStartSeq :: Ordering -> UI p -> UI p
-uiStartSeq side ui =
-  case uiNorm ui of
-    UI { .. } ->
-      case seqCur uiPtr of
-        Nothing -> UI { .. }
-        Just dsh ->
-          let d' = otherDir uiDir
-              doit xs o = UI { uiDir = d', uiPtr = mk xs, uiOpened = o }
-          in
-          case thing dsh of
-            Selected {} -> UI { .. }
+uiStartSeq side ui@UI { .. } =
+  case seqCur uiPtr of
+    Just sh | not (uiAlone ui) ->
+      let d'  = otherDir uiDir
+          els = case thing sh of
+                  Selected {} -> []
+                  Prim {}     -> [sh]
+                  Many d xs   -> if d == d' then xs else [sh]
+      in UI { uiDir    = d'
+            , uiPtr    = newSeq side [] [] els
+            , uiOpened = (seqBefore uiPtr, seqAfter uiPtr) : uiOpened
+            }
+    _ -> uiClose side ui
 
-            Many d xs ->
-               case (seqBefore uiPtr, seqAfter uiPtr, uiOpened) of
-                 ([],[],[]) -> doit (if d' == d then xs else [dsh]) uiOpened
-                 ([],[],_)  -> UI { .. }
-                 (b,a,o)    -> doit (if d' == d then xs else [dsh]) ((b,a) : o)
-
-            Prim {} ->
-               case (seqBefore uiPtr, seqAfter uiPtr, uiOpened) of
-                 ([],[],[]) -> doit [dsh] uiOpened
-                 ([],[],_)  -> UI { .. }
-                 (b,a,o)    -> doit [dsh] ((b,a) : o)
+uiClose :: Ordering -> UI p -> UI p
+uiClose side UI { .. } =
+  case seqCur uiPtr of
+    Just sh | Many d xs <- thing sh, d == uiDir ->
+         UI { uiPtr = newSeq side (seqBefore uiPtr) (seqAfter uiPtr) xs
+            , .. }
+    _ -> UI { uiDir    = d'
+            , uiPtr    = newSeq side before after els
+            , uiOpened = drop 1 uiOpened
+            }
   where
-  mk as =
-    case (side, as) of
-      (LT, xs) ->
-        SeqPtr { seqBefore = [], seqCur = Nothing, seqAfter = xs }
+  d'  = otherDir uiDir
 
-      (EQ, x : xs) ->
-        SeqPtr { seqBefore = [], seqCur = Just x, seqAfter = xs }
+  (before,after) = fromMaybe ([],[]) (listToMaybe uiOpened)
 
-      (GT, xs) ->
-        SeqPtr { seqBefore = reverse xs, seqCur = Nothing, seqAfter = [] }
-
-      _ -> seqEmpty
-
+  els = case seqToList uiPtr of
+          []   -> []
+          [sh] -> case thing sh of
+                    Many d ds | d == d' -> ds
+                    _                   -> [sh]
+          xs   -> [ manySh uiDir xs ]
 
 
 
@@ -242,110 +253,20 @@ uiOnPrim f a ui =
 uiWithCur :: (SeqPtr (Dim (Shape p)) -> SeqPtr (Dim (Shape p))) -> UI p -> UI p
 uiWithCur f UI { .. } = UI { uiPtr = f uiPtr, .. }
 
-uiMove :: SeqDir -> UI p -> UI p
-uiMove d = uiWithCur $ seqMove d
+uiMove :: Ordering -> UI p -> UI p
+uiMove side UI { .. } = UI { uiPtr = newPtr, .. }
+ where
+  newPtr =
+    case seqCur uiPtr of
+      Just sh | Many d xs <- thing sh, d == uiDir ->
+        newSeq side (seqBefore uiPtr) (seqAfter uiPtr) xs
+      _ -> case side of
+             LT -> seqMove Prev uiPtr
+             EQ -> uiPtr
+             GT -> seqMove Next uiPtr
 
-uiSet :: Maybe (Dim (Shape p)) -> UI p -> UI p
-uiSet a = uiWithCur (seqSet a)
-
-uiCurShape :: UI p -> Maybe (Shape p)
-uiCurShape UI { .. } =
-  do Dim { thing } <- seqCur uiPtr
-     return thing
-
-uiSplit :: Ordering -> UI p -> UI p
-uiSplit = uiStartSeq {-pos UI { .. } =
-  case seqCur uiPtr of
-    Just dshape ->
-      case thing dshape of
-        _ | ( case (seqBefore uiPtr, seqAfter uiPtr) of
-                      ([],[]) -> null uiOpened -- orphans may only be split
-                                               -- at the top level
-                      _ -> True
-                  ) ->
-         UI { uiDir    = otherDir uiDir
-            , uiOpened = (seqBefore uiPtr, seqAfter uiPtr) : uiOpened
-            , uiPtr    = case pos of
-                           LT -> SeqPtr { seqBefore = []
-                                        , seqCur    = Nothing
-                                        , seqAfter  = [dshape]
-                                        }
-                           EQ -> SeqPtr { seqBefore = []
-                                        , seqCur    = Just dshape
-                                        , seqAfter  = []
-                                        }
-                           GT -> SeqPtr { seqBefore = [dshape]
-                                        , seqCur    = Nothing
-                                        , seqAfter  = []
-                                        }
-               }
-
-        _ -> uiOpen pos UI { .. }
-
-    _ -> UI { .. }
--}
+uiSet :: Basic p => Maybe p -> UI p -> UI p
+uiSet a = uiWithCur $ seqSet $ fmap prim a
 
 
-uiOpen :: Ordering -> UI p -> UI p
-uiOpen pos UI { .. } =
-  case seqCur uiPtr of
-    Nothing -> UI { .. }
-    Just a ->
-      case thing a of
-        Many _ []       -> uiSet Nothing UI { .. }
-        Many d (x:xs)
-          | d == uiDir  -> flatten x xs
-          | otherwise   -> enter x xs
-        _ -> UI { .. }
-  where
-  flatten x xs =
-    let SeqPtr { .. } = uiPtr
-    in UI { uiPtr = SeqPtr { seqCur = Just x, seqAfter = xs ++ seqAfter, .. }
-          , .. }
-
-  enter a as =
-    UI { uiPtr    = case pos of
-                      LT -> SeqPtr { seqBefore = []
-                                   , seqCur    = Nothing
-                                   , seqAfter  = a : as
-                                   }
-                      EQ -> SeqPtr { seqBefore = []
-                                   , seqCur = Just a
-                                   , seqAfter = as }
-                      GT  -> SeqPtr { seqBefore = reverse (a : as)
-                                    , seqCur = Nothing
-                                    , seqAfter = []
-                                    }
-       , uiDir    = otherDir uiDir
-       , uiOpened = (seqBefore uiPtr,seqAfter uiPtr) : uiOpened
-       }
-
-uiClose :: UI p -> UI p
-uiClose UI { .. } =
-  case seqCur uiPtr of
-    Just (thing -> Many _ []) -> UI { uiPtr = seqSet Nothing uiPtr, .. }
-    Just (thing -> Many d (x:xs))
-      | d == uiDir -> UI { uiPtr = let s = seqSet (Just x) uiPtr
-                                   in s { seqAfter = xs ++ seqAfter s }, .. }
-    _ ->
-       case uiOpened of
-         (seqBefore,seqAfter) : others ->
-             UI { uiPtr    = SeqPtr { seqCur = new, .. }
-                , uiDir    = otherDir uiDir
-                , uiOpened = others
-                }
-         [] -> case els of
-                 _ : _ : _ -> UI { uiPtr = SeqPtr { seqBefore = []
-                                                  , seqAfter = []
-                                                  , seqCur = new }
-                                  , uiDir = otherDir uiDir
-                                  , uiOpened = []
-                                  }
-                 _ -> UI { .. }
-  where
-  els = seqToList uiPtr
-  new = case els of
-            []  -> Nothing
-            [x] -> Just x
-            xs  -> Just (manySh uiDir xs)
 

@@ -159,34 +159,37 @@ uiKey f k kms mb ui@Screen { .. }
 
   | otherwise = Just $ withF $ \fo ->
     case () of
-    {-
-      _ | trace (show kms) $ k == key_LEFT, kms `kmHas` km_SHIFT
+
+      _ | k == key_LEFT, kms `kmHas` km_SHIFT
         , uiDir fo == Hor -> uiMoveSel Prev fo
 
         | k == key_RIGHT, kms `kmHas` km_SHIFT
         , uiDir fo == Hor -> uiMoveSel Next fo
 
         | k == key_UP, kms `kmHas` km_SHIFT
-        , uiDir fo == Ver -> trace "SHIFT SEL" $ uiMoveSel Prev fo
+        , uiDir fo == Ver -> uiMoveSel Prev fo
 
         | k == key_DOWN, kms `kmHas` km_SHIFT
         , uiDir fo == Ver -> uiMoveSel Next fo
-        -}
 
-      _ | k == key_LEFT  -> if uiDir fo == Hor then uiMove Prev fo else uiSplit LT fo
-        | k == key_RIGHT -> if uiDir fo == Hor then uiMove Next fo else uiSplit GT fo
-        | k == key_UP    -> if uiDir fo == Ver then uiMove Prev fo else uiSplit LT fo
-        | k == key_DOWN  -> if uiDir fo == Ver then uiMove Next fo else uiSplit GT fo
+      _ | k == key_LEFT  ->
+            if uiDir fo == Hor then uiMove LT fo else uiStartSeq LT fo
+        | k == key_RIGHT ->
+            if uiDir fo == Hor then uiMove GT fo else uiStartSeq GT fo
+        | k == key_UP ->
+            if uiDir fo == Ver then uiMove LT fo else uiStartSeq LT fo
+        | k == key_DOWN ->
+            if uiDir fo == Ver then uiMove GT fo else uiStartSeq GT fo
 
         | k == key_ENTER  ->
             case uiCurShape fo of
               Nothing ->
-                uiSet (Just $ prim $ F (theStyle f) (newEditor "") Err) fo
+                uiSet (Just $ F (theStyle f) (newEditor "") Err) fo
               Just (Prim _)     -> uiWithPrim tbStartEdit fo
-              Just (Many {})    -> uiOpen EQ fo
+              Just (Many {})    -> uiStartSeq EQ fo
               _                 -> fo
 
-        | k == key_ESCAPE -> uiClose fo
+        | k == key_ESCAPE -> uiClose EQ fo
         | otherwise       -> fo
 
   where

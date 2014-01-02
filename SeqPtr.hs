@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module SeqPtr where
 
-import Data.Maybe(maybeToList)
+import Data.Maybe(maybeToList,listToMaybe)
 
 data SeqDir = Prev | Next deriving Eq
 
@@ -20,6 +20,37 @@ instance Functor SeqPtr where
 
 seqEmpty :: SeqPtr a
 seqEmpty = SeqPtr { seqBefore = [], seqCur = Nothing, seqAfter = [] }
+
+newSeq :: Ordering -> [a] -> [a] -> [a] -> SeqPtr a
+newSeq side before after new =
+  case side of
+    LT -> SeqPtr { seqBefore = before
+                 , seqCur    = Nothing
+                 , seqAfter  = new ++ after }
+
+    EQ -> SeqPtr { seqBefore = before
+                 , seqCur    = listToMaybe new
+                 , seqAfter  = drop 1 new ++ after
+                 }
+
+    GT -> SeqPtr { seqBefore = reverse new ++ before
+                 , seqCur    = Nothing
+                 , seqAfter  = after }
+
+
+seqExtract :: SeqDir -> SeqPtr a -> Maybe (a, SeqPtr a)
+
+seqExtract Prev SeqPtr { .. } =
+  case seqBefore of
+    []     -> Nothing
+    x : xs -> Just (x, SeqPtr { seqBefore = xs, .. })
+
+seqExtract Next SeqPtr { .. } =
+  case seqAfter of
+    []     -> Nothing
+    x : xs -> Just (x, SeqPtr { seqAfter = xs, .. })
+
+
 
 seqMoves :: [SeqDir] -> SeqPtr a -> SeqPtr a
 seqMoves ms s = foldl (flip seqMove) s ms
