@@ -21,7 +21,7 @@ actorVars Actor { .. } =
 
 
 blue, yellow, white :: Color
-blue    = Color 0 0 0.80 1
+blue    = Color 0 0.3 1 1
 yellow  = Color 1 0.80 0 1
 white   = Color 1 1 1 1
 

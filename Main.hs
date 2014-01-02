@@ -17,7 +17,21 @@ import Formula
 import Editor
 import Actor
 
-import Debug.Trace
+import System.Random
+
+randF :: IO Prop
+randF =
+  do op <- do k <- randomRIO (0,3)
+              return $ [ (:==), (:/=), (:<), (:<=) ] !! k
+     t1 <- randomV
+     t2 <- do k <- randomIO
+              if k then randomK else randomV
+     return (op t1 t2)
+
+  where
+  randomK = K `fmap` randomRIO (1,5)
+  randomV = do k <- randomRIO (0,3)
+               return $ [ vw1, vh1, vw1, vh1, vx2, vy2 ] !! k
 
 main :: IO ()
 main =
@@ -37,6 +51,9 @@ main =
           startTimer redraw
           startTimer nextExample
 
+          form <- randF
+          print form
+
           let goMb Nothing   = return ()
               goMb (Just ui) = go ui
 
@@ -47,7 +64,7 @@ main =
                       let ch = do c <- evKeyChar e
                                   guard (isPrint c)
                                   return c
-                      in goMb $ uiKey f (evKey e) (evKeyMod e) ch ui
+                      in goMb $ uiKey form f (evKey e) (evKeyMod e) ch ui
 
                     Time e
                       | evTimer e == redraw ->
@@ -108,7 +125,7 @@ getNextExample Screen { .. }
   | uiOnPrim tbEditing False theFormula = Screen { .. }
   | otherwise = Screen { goodExamples = drop 1 goodExamples
                        , badExamples  = drop 1 badExamples
-                       , theFormula = case drop 1 badExamples of
+                       , theFormula = case drop 1 goodExamples of
                                         x : _ -> fmap (setStyle (actorVars x))
                                                               theFormula
                                         _ -> theFormula
@@ -116,13 +133,14 @@ getNextExample Screen { .. }
                        }
 
 
-doneEditing :: Screen -> Screen
-doneEditing Screen { .. } =
+doneEditing :: Prop -> Screen -> Screen
+doneEditing tgt Screen { .. } =
   let f1 = uiWithPrim tbStopEdit theFormula
+
       p  = toProp f1
 
-      stGood = foldr assert noProps $ p     : basicConstraints
-      stBad  = foldr assert noProps $ Not p : basicConstraints
+      stGood = foldr assert noProps $ (Not p :&& tgt) : basicConstraints
+      stBad  = foldr assert noProps $ (p :&& Not tgt) : basicConstraints
 
       mbCy [] = []
       mbCy xs = cycle xs
@@ -138,8 +156,8 @@ doneEditing Screen { .. } =
 
 
 
-uiKey :: Font -> Key -> KeyMod -> Maybe Char -> Screen -> Maybe Screen
-uiKey f k kms mb ui@Screen { .. }
+uiKey :: Prop -> Font -> Key -> KeyMod -> Maybe Char -> Screen -> Maybe Screen
+uiKey tgt f k kms mb ui@Screen { .. }
   | uiOnPrim tbEditing False theFormula =
     Just $
     case () of
@@ -149,13 +167,13 @@ uiKey f k kms mb ui@Screen { .. }
         | k == key_BACKSPACE      -> textBox tbBackSp
         | k == key_INSERT         -> textBox tbToggleIns
         | k == key_ENTER
-       || k == key_ESCAPE         -> doneEditing ui
+       || k == key_ESCAPE         -> doneEditing tgt ui
         | Just c <- mb, isPrint c -> textBox (tbChar c)
         | otherwise               -> ui
 
   | Just 'q' <- mb  = Nothing
 
-  | k == key_DELETE = Just $ doneEditing $ withF $ uiSet Nothing
+  | k == key_DELETE = Just $ doneEditing tgt $ withF $ uiSet Nothing
 
   | otherwise = Just $ withF $ \fo ->
     case () of

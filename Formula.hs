@@ -18,7 +18,7 @@ import Group
 
 
 data F  = F Style Editor S
-data S  = Editing | Err | Ok Prop
+data S  = Editing | Err | Ok Prop (Maybe Bool)
 
 instance Basic F where
 
@@ -27,12 +27,21 @@ instance Basic F where
           (width,height) = editorDim withCur s e'
 
   drawPrim pos Dim { thing = F s e p, .. } =
-      editorDraw withCur pos (width,height) s e'
+      editorDraw withCur pos (width,height) s' e'
     where (withCur,e') = visibleEditor p e
+          s' = s {- case p of
+                 Ok _ (Just b) -> 
+                  if b
+                    then s { pBgColor = Color 0 0.3 0 1 }
+                    else s { pBorder = Nothing
+                           , pColor  = Color 0.4 0 0 1
+                           , pBgColor = Color 0 0 0 0
+                           }
+                 _ -> s -}
 
 visibleEditor :: S -> Editor -> (Bool,Editor)
 visibleEditor Editing e = (True, e)
-visibleEditor (Ok _) e  = (False, e)
+visibleEditor (Ok {}) e = (False, e)
 visibleEditor Err e     = (False, newEditor $
                               case editorText e of
                                 cs | all isSpace cs -> "(off)"
@@ -49,7 +58,7 @@ tbStartEdit (F p txt _) = F p txt Editing
 tbStopEdit :: F -> F
 tbStopEdit (F o e _) = F o e $ case parse (editorText e) of
                                   Nothing -> Err
-                                  Just p  -> Ok p
+                                  Just p  -> Ok p Nothing
 
 tbWithEditor :: (Editor -> Editor) -> F -> F
 tbWithEditor f (F o e Editing) = F o (f e) Editing
@@ -78,7 +87,7 @@ tbBackSp = tbWithEditor editorBackSp
 toProp :: UI F -> Prop
 toProp = foldUI ifOne ifMany
   where
-  ifOne _ (F _ _ (Ok p)) = p
+  ifOne _ (F _ _ (Ok p _)) = p
   ifOne _ _              = PTrue
 
   ifMany Hor []          = PFalse
@@ -89,11 +98,7 @@ toProp = foldUI ifOne ifMany
 
 
 setStyle :: Map Name Integer -> F -> F
-setStyle env (F s e (Ok p)) = F s { pBgColor = c } e (Ok p)
-  where c = case evalProp env p of
-              Nothing     -> Color 0.3 0.3 0.3 0
-              Just True   -> Color 0 0.6 0 0
-              Just False  -> Color 0.6 0 0 0
+setStyle env (F s e (Ok p _)) = F s e (Ok p (evalProp env p))
 setStyle _ f = f
 
 evalProp :: Map Name Integer -> Prop -> Maybe Bool
