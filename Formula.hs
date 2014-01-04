@@ -3,6 +3,7 @@
 module Formula where
 
 import Allegro.Graphics(Color(..))
+import Allegro.Primitives(drawLine,Line(..))
 import Data.Integer.SAT
 import Text.ParserCombinators.ReadP
 import Data.Char(isSpace)
@@ -26,10 +27,11 @@ instance Basic F where
     where (withCur,e') = visibleEditor p e
           (width,height) = editorDim withCur s e'
 
-  drawPrim pos Dim { thing = F s e p, .. } =
-      editorDraw withCur pos (width,height) s' e'
+  drawPrim (x,y) Dim { thing = F s e p, .. } =
+      do drawLine (Line (x,y) (x,y+height)) (Color 1 1 1 1) 0
+         editorDraw withCur (x,y) (width,height) s' e'
     where (withCur,e') = visibleEditor p e
-          s' = s {- case p of
+          s' = s { pBorder = Nothing, pBgColor = Color 0 0.3 0 0 } {- case p of
                  Ok _ (Just b) -> 
                   if b
                     then s { pBgColor = Color 0 0.3 0 1 }
@@ -88,7 +90,7 @@ toProp :: UI F -> Prop
 toProp = foldUI ifOne ifMany
   where
   ifOne _ (F _ _ (Ok p _)) = p
-  ifOne _ _              = PTrue
+  ifOne _ _                = PTrue
 
   ifMany Hor []          = PFalse
   ifMany Hor xs          = foldr1 (:||) xs
@@ -191,12 +193,12 @@ pExpr = chainl1 pProd $ choice [ kw "+" >> return (mkAdd (+) (:+))
 
   pNeg  = pAtom <++ (kw "-" >> fmap mkNeg pAtom)
 
-  pAtom = choice [ var "bw" 0
-                 , var "bh" 1
-                 , var "yw" 2
-                 , var "yh" 3
-                 , var "dx" 4
-                 , var "dy" 5
+  pAtom = choice [ var "r" 0
+                 , var "y" 1
+                 , var "g" 2
+                 , var "c" 3
+                 , var "b" 4
+                 , var "m" 5
                  , K `fmap` num
                  , between (kw "(") (kw ")") pExpr
                  ]
