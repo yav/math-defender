@@ -94,7 +94,7 @@ main =
           go x Screen { theFormula    = emptyUI
                       , goodRejected  = []
                       , badAccepted   = []
-                      , visible       = [True,False,False,False]
+                      , visible       = repeat True -- [True,False,False,False]
                       , theFont       = f
                       }
 
@@ -112,17 +112,28 @@ drawScreen :: Int64 -> Int64 -> Screen -> IO ()
 drawScreen start now Screen { .. } =
   do clearToColor (Color 0 0 0 0)
 
-     let space  = 50
-         steps  = drawsPerSec / examplePerSec
-
-         t :: Float
-         t = 2 * fromIntegral (now - start) * (space / steps)
+     let
 
          screenW' = fromIntegral screenW
          screenH' = fromIntegral screenH
 
          lst x = zip [ -1, 1 .. ] . reverse . take (round (x / space))
+         good  = lst screenW' goodRejected
+         bad   = lst screenW' badAccepted
 
+     let parts = [ (Color 0.8 0 0 0,   fst . part1)
+                 , (Color 0.8 0.8 0 0, snd . part1)
+                 , (Color 0 0.8 0 0, fst . part2)
+                 , (Color 0 0.8 0.6 0, snd . part2)
+                 ] `zip` visible
+
+         drawPart _ _  (_,False)       = return ()
+         drawPart voff xs ((c,f),True) = draw1 voff c f xs
+
+     mapM_ (drawPart 0 good) parts
+     mapM_ (drawPart 150 bad) parts
+
+{-
      forM_ (lst screenW' goodRejected) $ \(x,p) ->
         withTransformSRT (5,5) 0
             ( fromInteger x * space + t
@@ -134,6 +145,7 @@ drawScreen start now Screen { .. } =
             ( (fromIntegral screenW - space) / 2
             , fromInteger x * space + t
             ) (drawActor visible p)
+-}
 
 
      shDraw (800,500) $ uiToShape theFormula
@@ -142,6 +154,31 @@ drawScreen start now Screen { .. } =
 
   where mb [] _      = return ()
         mb (x : _) f = f x
+
+        space  = 50
+        steps  = drawsPerSec / examplePerSec
+
+        t :: Float
+        t = 2 * fromIntegral (now - start) * (space / steps)
+
+        vert = (fromIntegral screenH - space) / 2
+
+        draw1 _ _ _ [] = return ()
+        draw1 voff c f ((x1,p) : more) =
+          do let start = ( fromIntegral x1 * space + t
+                         , voff + vert - 20 * fromIntegral (f p)
+                         )
+             drawShape (Circle start 5 Nothing) c Filled
+             case more of
+                (x2,q) : _ ->
+                  do let end = ( fromIntegral x2 * space + t
+                               , voff + vert - 20 * fromIntegral (f q)
+                               )
+                     drawLine (Line start end) c 0
+                _ -> return ()
+             draw1 voff c f more
+
+
 
 
 
