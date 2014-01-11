@@ -3,7 +3,7 @@
 module Group where
 
 import Allegro.Graphics
-import Allegro.Primitives
+import Allegro.Primitives hiding (Dim)
 import Control.Monad(zipWithM_,guard)
 import Data.Maybe(fromMaybe,listToMaybe)
 import SeqPtr
